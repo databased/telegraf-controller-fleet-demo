@@ -1,0 +1,55 @@
+# PROPOSED compose.yaml. Changes: one EULA spelling (accept) shared with the scripts,
+# org/bucket/URL/host/container-glob passed in from .env, PSI script run via /bin/sh
+# so the file mode no longer matters. Still UNTESTED at runtime.
+# Usage: ACCEPT_EULA=accept docker compose up -d   (after reading the EULA)
+# WARNING: the docker socket mount is root-equivalent; ":ro" does not restrict the Docker API.
+
+services:
+  telegraf-controller:
+    image: influxdata/telegraf-controller:1.2.0
+    container_name: telegraf-controller
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 0.5
+    ports:
+      - "127.0.0.1:8888:8888"
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - telegraf-controller:/var/lib/telegraf-controller
+    environment:
+      # Same token the product expects and the same variable run-controller.sh checks.
+      TELEGRAF_CONTROLLER_EULA: "${ACCEPT_EULA:?read the EULA, then set ACCEPT_EULA=accept}"
+      SESSION_SECRET: "${SESSION_SECRET:?run scripts/make-env.sh}"
+
+  telegraf-agent:
+    image: telegraf:1.40.2
+    container_name: telegraf-agent
+    restart: unless-stopped
+    network_mode: host
+    mem_limit: 512m
+    group_add:
+      - "${DOCKER_GID:?run scripts/make-env.sh}"
+    environment:
+      TELEGRAF_CONTROLLER_TOKEN: "${TELEGRAF_CONTROLLER_TOKEN:?required}"
+      INFLUX_TOKEN: "${INFLUX_TOKEN:?required}"
+      INFLUX_URL: "${INFLUX_URL:?required}"
+      INFLUX_ORG: "${INFLUX_ORG:?required}"
+      INFLUX_BUCKET: "${INFLUX_BUCKET:?required}"
+      AGENT_HOSTNAME: "${AGENT_HOSTNAME:?required}"
+      WATCH_CONTAINERS: "${WATCH_CONTAINERS:-*}"
+      HOST_MOUNT_PREFIX: /hostfs
+      HOST_ETC: /hostfs/etc
+      HOST_PROC: /hostfs/proc
+      HOST_SYS: /hostfs/sys
+    volumes:
+      - /:/hostfs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./scripts/psi-lineprotocol.sh:/etc/telegraf/psi-lineprotocol.sh:ro
+    command:
+      - --config
+      - "http://127.0.0.1:8888/api/configs/${CONFIG_ID:?required}/toml?agent_id=${AGENT_ID:?required}"
+      - --config-url-watch-interval
+      - 1m
+
+volumes:
+  telegraf-controller:
